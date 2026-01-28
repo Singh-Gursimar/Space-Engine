@@ -9,6 +9,7 @@ Controls:
     SPACE           - Pause/Resume simulation
     +/-             - Adjust time scale
     M               - Toggle menu
+    K               - Toggle collisions
     H               - Show help
     ESC             - Quit
 """
@@ -146,34 +147,7 @@ class SpaceEngine:
         Add a celestial body at a screen position.
         Projects the screen position into 3D space.
         """
-        # Get camera info
-        camera = self.renderer.camera
-        
-        # Calculate position in 3D space
-        # Normalize screen coordinates to -1 to 1
-        norm_x = (screen_pos[0] / self.width) * 2 - 1
-        norm_y = -((screen_pos[1] / self.height) * 2 - 1)  # Flip Y
-        
-        # Calculate offset from camera target
-        offset_scale = camera.distance * 0.3
-        
-        # Calculate right and up vectors based on camera orientation
-        az_rad = math.radians(camera.azimuth)
-        el_rad = math.radians(camera.elevation)
-        
-        # Right vector
-        right_x = math.cos(az_rad)
-        right_z = -math.sin(az_rad)
-        
-        # Up vector (simplified)
-        up_y = math.cos(el_rad)
-        
-        # Calculate 3D position
-        pos_x = camera.target.x + norm_x * offset_scale * right_x
-        pos_y = camera.target.y + norm_y * offset_scale * up_y
-        pos_z = camera.target.z + norm_x * offset_scale * right_z
-        
-        position = Vector3(pos_x, pos_y, pos_z)
+        position = self._screen_to_world_pos(screen_pos)
         
         # Calculate orbital velocity if there's a central body
         velocity = Vector3(0, 0, 0)
@@ -212,6 +186,75 @@ class SpaceEngine:
         
         self.physics.add_body(body)
         print(f"Added {name} at position {position}")
+    
+    def _screen_to_world_pos(self, screen_pos: tuple) -> Vector3:
+        """
+        Convert a screen position to a 3D world position using OpenGL unprojection.
+        
+        Args:
+            screen_pos: (x, y) screen coordinates
+            
+        Returns:
+            Vector3 world position on the camera's focal plane
+        """
+        camera = self.renderer.camera
+        
+        # Get OpenGL matrices
+        modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
+        projection = glGetDoublev(GL_PROJECTION_MATRIX)
+        viewport = glGetIntegerv(GL_VIEWPORT)
+        
+        # Flip Y coordinate (OpenGL has origin at bottom-left)
+        win_x = float(screen_pos[0])
+        win_y = float(viewport[3] - screen_pos[1])
+        
+        # Unproject at z=0.5 (middle of view frustum)
+        try:
+            world_x, world_y, world_z = gluUnProject(win_x, win_y, 0.5, modelview, projection, viewport)
+            
+            # Calculate direction from camera to unprojected point
+            cam_pos = camera.position
+            direction = Vector3(world_x - cam_pos.x, world_y - cam_pos.y, world_z - cam_pos.z).normalize()
+            
+            # Project onto the plane at camera target distance
+            # Place object at a fixed distance from camera toward target
+            placement_distance = camera.distance * 0.8
+            
+            position = Vector3(
+                cam_pos.x + direction.x * placement_distance,
+                cam_pos.y + direction.y * placement_distance,
+                cam_pos.z + direction.z * placement_distance
+            )
+            
+            return position
+        except:
+            # Fallback to simple calculation if unprojection fails
+            norm_x = (screen_pos[0] / self.width) * 2 - 1
+            norm_y = -((screen_pos[1] / self.height) * 2 - 1)
+            
+            offset_scale = camera.distance * 0.3
+            az_rad = math.radians(camera.azimuth)
+            
+            right_x = math.cos(az_rad)
+            right_z = -math.sin(az_rad)
+            
+            pos_x = camera.target.x + norm_x * offset_scale * right_x
+            pos_y = camera.target.y + norm_y * offset_scale
+            pos_z = camera.target.z + norm_x * offset_scale * right_z
+            
+            return Vector3(pos_x, pos_y, pos_z)
+    
+    def _get_placement_position(self) -> tuple:
+        """
+        Get the 3D placement position if currently dragging.
+        
+        Returns:
+            (x, y, z) tuple or None if not dragging
+        """
+        if self.menu.is_dragging() and not self.menu.point_in_menu(self.menu.drag_pos):
+            pos = self._screen_to_world_pos(self.menu.drag_pos)
+            return (pos.x, pos.y, pos.z)
+        return None
     
     def _handle_resize(self, width: int, height: int) -> None:
         """Handle window resize."""
@@ -253,6 +296,11 @@ class SpaceEngine:
         elif key == K_c:
             for body in self.physics.bodies:
                 body.clear_trail()
+        
+        elif key == K_k:
+            self.physics.collisions_enabled = not self.physics.collisions_enabled
+            status = "enabled" if self.physics.collisions_enabled else "disabled"
+            print(f"Collisions {status}")
         
         elif key == K_PLUS or key == K_EQUALS:
             self.physics.set_time_scale(self.physics.time_scale * 1.5)
@@ -338,8 +386,11 @@ class SpaceEngine:
     
     def render(self) -> None:
         """Render the scene."""
-        # Render 3D scene
-        self.renderer.render(self.physics.bodies)
+        # Get placement position if dragging
+        placement_pos = self._get_placement_position()
+        
+        # Render 3D scene with particles and placement indicator
+        self.renderer.render(self.physics.bodies, self.physics.particles, placement_pos)
         
         # Switch to 2D for UI
         self._setup_2d()

@@ -408,7 +408,12 @@ class Menu:
         item = self.dragging_item
         x, y = self.drag_pos
         
-        # Semi-transparent preview
+        # Check if outside menu area - show placement indicator
+        if not self.point_in_menu((x, y)):
+            # Draw crosshair/reticle at drop location
+            self._draw_placement_indicator(screen, x, y)
+        
+        # Semi-transparent preview following cursor
         preview_surface = pygame.Surface((120, 40), pygame.SRCALPHA)
         preview_surface.fill((50, 60, 80, 200))
         
@@ -422,3 +427,46 @@ class Menu:
         
         # Draw centered on cursor
         screen.blit(preview_surface, (x - 60, y - 20))
+    
+    def _draw_placement_indicator(self, screen: pygame.Surface, x: int, y: int) -> None:
+        """Draw a visual indicator showing where the object will be placed."""
+        # Outer circle (pulsing effect based on time)
+        import time
+        pulse = abs(math.sin(time.time() * 4)) * 0.3 + 0.7
+        outer_radius = int(30 * pulse)
+        
+        # Draw concentric circles
+        for i, radius in enumerate([outer_radius, 20, 10]):
+            alpha = 150 - i * 40
+            color = (*self.accent_color[:3], alpha) if len(self.accent_color) == 3 else (*self.accent_color[:3], alpha)
+            # Create surface for alpha support
+            circle_surf = pygame.Surface((radius * 2 + 4, radius * 2 + 4), pygame.SRCALPHA)
+            pygame.draw.circle(circle_surf, (100, 180, 255, alpha), (radius + 2, radius + 2), radius, 2)
+            screen.blit(circle_surf, (x - radius - 2, y - radius - 2))
+        
+        # Draw crosshair lines
+        line_length = 50
+        line_color = (100, 180, 255, 200)
+        
+        # Create surface for alpha lines
+        line_surf = pygame.Surface((line_length * 2 + 20, line_length * 2 + 20), pygame.SRCALPHA)
+        center = line_length + 10
+        
+        # Horizontal lines (with gap in middle)
+        pygame.draw.line(line_surf, line_color, (0, center), (center - 15, center), 2)
+        pygame.draw.line(line_surf, line_color, (center + 15, center), (center * 2, center), 2)
+        
+        # Vertical lines (with gap in middle)
+        pygame.draw.line(line_surf, line_color, (center, 0), (center, center - 15), 2)
+        pygame.draw.line(line_surf, line_color, (center, center + 15), (center, center * 2), 2)
+        
+        screen.blit(line_surf, (x - center, y - center))
+        
+        # Draw "DROP HERE" text
+        drop_text = self.font_small.render("DROP TO PLACE", True, (100, 180, 255))
+        screen.blit(drop_text, (x - drop_text.get_width() // 2, y + 40))
+        
+        # Draw small info about the item
+        if self.dragging_item:
+            info_text = self.font_small.render(f"Mass: {self.dragging_item.mass:.2f}", True, (150, 150, 150))
+            screen.blit(info_text, (x - info_text.get_width() // 2, y + 55))

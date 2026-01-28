@@ -105,6 +105,15 @@ class UI:
         # Number of bodies
         y = self._render_text(screen, f"Bodies: {len(physics.bodies)}", x, y, self.font_small)
         
+        # Collision status
+        collision_status = "ON" if physics.collisions_enabled else "OFF"
+        collision_color = (100, 255, 100) if physics.collisions_enabled else (255, 100, 100)
+        y = self._render_text(screen, f"Collisions: {collision_status}", x, y, self.font_small, collision_color)
+        
+        # Particle count (if any)
+        if physics.particles.particles:
+            y = self._render_text(screen, f"Particles: {len(physics.particles.particles)}", x, y, self.font_small, self.dim_color)
+        
         # Total energy (for debugging/physics verification)
         if len(physics.bodies) > 0:
             energy = physics.total_energy()
@@ -158,6 +167,8 @@ class UI:
             ("C", "Clear all trails"),
             ("G", "Toggle grid"),
             ("T", "Toggle trails"),
+            ("K", "Toggle collisions"),
+            ("M", "Toggle sidebar menu"),
             ("1", "Load Solar System"),
             ("2", "Load Binary Stars"),
             ("3", "Load Earth-Moon"),

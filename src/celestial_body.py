@@ -49,12 +49,13 @@ class CelestialBody:
         
         # Acceleration (computed each frame)
         self.acceleration = Vector3(0, 0, 0)
+        self.prev_acceleration = Vector3(0, 0, 0)  # For Verlet integration
         
         # Trail for orbital visualization
         self.trail: List[Vector3] = []
         self.trail_length = trail_length
         self.trail_update_counter = 0
-        self.trail_update_frequency = 5  # Update trail every N frames
+        self.trail_update_frequency = 3  # Update trail every N frames
         
         # Selection state
         self.is_selected = False

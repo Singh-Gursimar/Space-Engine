@@ -1,11 +1,14 @@
 """3D Renderer for the space simulation using OpenGL."""
 
 import math
-from typing import List, Tuple
+from typing import List, Tuple, TYPE_CHECKING
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from .celestial_body import CelestialBody
 from .camera import Camera
+
+if TYPE_CHECKING:
+    from .particles import ParticleSystem
 
 
 class Renderer:
@@ -54,16 +57,21 @@ class Renderer:
         glEnable(GL_LIGHTING)
         glEnable(GL_LIGHT0)
         
-        # Light properties
-        light_position = [0.0, 100.0, 100.0, 1.0]
-        light_ambient = [0.2, 0.2, 0.2, 1.0]
-        light_diffuse = [1.0, 1.0, 1.0, 1.0]
+        # Main light (sun-like, from center)
+        light_position = [0.0, 50.0, 0.0, 1.0]  # Positional light at origin
+        light_ambient = [0.15, 0.15, 0.18, 1.0]  # Slight blue-ish ambient
+        light_diffuse = [1.0, 0.95, 0.9, 1.0]  # Warm white
         light_specular = [1.0, 1.0, 1.0, 1.0]
         
         glLightfv(GL_LIGHT0, GL_POSITION, light_position)
         glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient)
         glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse)
         glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular)
+        
+        # Light attenuation for more realistic falloff
+        glLightf(GL_LIGHT0, GL_CONSTANT_ATTENUATION, 1.0)
+        glLightf(GL_LIGHT0, GL_LINEAR_ATTENUATION, 0.0001)
+        glLightf(GL_LIGHT0, GL_QUADRATIC_ATTENUATION, 0.000001)
         
         # Enable color material
         glEnable(GL_COLOR_MATERIAL)
@@ -75,6 +83,11 @@ class Renderer:
         
         # Line smoothing
         glEnable(GL_LINE_SMOOTH)
+        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
+        
+        # Point smoothing
+        glEnable(GL_POINT_SMOOTH)
+        glHint(GL_POINT_SMOOTH_HINT, GL_NICEST)
         glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
         
         # Create quadric for sphere rendering
@@ -102,18 +115,19 @@ class Renderer:
         self._setup_projection()
     
     def clear(self) -> None:
-        """Clear the screen."""
-        glClearColor(0.02, 0.02, 0.05, 1.0)  # Dark space background
+        """Clear the screen with a deep space gradient-like background."""
+        glClearColor(0.01, 0.01, 0.03, 1.0)  # Very dark blue-black
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     
     def draw_body(self, body: CelestialBody) -> None:
         """
-        Draw a celestial body.
+        Draw a celestial body with enhanced visuals.
         
         Args:
             body: The celestial body to draw
         """
         glPushMatrix()
+        glPushAttrib(GL_ALL_ATTRIB_BITS)  # Save all OpenGL state
         
         # Move to body position
         glTranslatef(body.position.x, body.position.y, body.position.z)
@@ -122,44 +136,98 @@ class Renderer:
         if body.is_star:
             # Stars emit light - disable lighting for them
             glDisable(GL_LIGHTING)
-            glColor3f(*body.color)
+            glDisable(GL_DEPTH_TEST)
             
-            # Draw glow effect
-            self._draw_glow(body.radius * 1.5, body.color)
+            # Draw outer corona/glow first
+            self._draw_corona(body.radius, body.color)
+            
+            glEnable(GL_DEPTH_TEST)
+            
+            # Draw the bright core
+            glColor3f(*body.color)
+            gluSphere(self.quadric, body.radius, self.sphere_slices, self.sphere_stacks)
+            
+            # Add bright center
+            glColor3f(1.0, 1.0, 0.95)
+            gluSphere(self.quadric, body.radius * 0.4, 16, 16)
             
             glEnable(GL_LIGHTING)
         else:
-            glColor3f(*body.color)
-        
-        # Draw selection indicator
-        if body.is_selected:
-            glDisable(GL_LIGHTING)
-            glColor4f(1.0, 1.0, 0.0, 0.5)
-            gluSphere(self.quadric, body.radius * 1.2, 16, 16)
+            # Enable proper lighting for planets
             glEnable(GL_LIGHTING)
+            
+            # Set up material for planets
+            ambient = [body.color[0] * 0.2, body.color[1] * 0.2, body.color[2] * 0.2, 1.0]
+            diffuse = [body.color[0], body.color[1], body.color[2], 1.0]
+            specular = [0.4, 0.4, 0.4, 1.0]
+            shininess = 30.0
+            
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, ambient)
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, diffuse)
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular)
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, shininess)
+            
             glColor3f(*body.color)
+            
+            # Draw selection indicator
+            if body.is_selected:
+                glDisable(GL_LIGHTING)
+                glEnable(GL_BLEND)
+                glColor4f(1.0, 1.0, 0.0, 0.3)
+                gluSphere(self.quadric, body.radius * 1.3, 16, 16)
+                glEnable(GL_LIGHTING)
+                glColor3f(*body.color)
+            
+            # Draw atmosphere for larger planets
+            if body.radius > 5:
+                self._draw_atmosphere(body.radius, body.color)
+            
+            # Draw the sphere
+            gluSphere(self.quadric, body.radius, self.sphere_slices, self.sphere_stacks)
         
-        # Draw the sphere
-        gluSphere(self.quadric, body.radius, self.sphere_slices, self.sphere_stacks)
-        
+        glPopAttrib()  # Restore all OpenGL state
         glPopMatrix()
     
-    def _draw_glow(self, radius: float, color: Tuple[float, float, float]) -> None:
-        """Draw a glow effect for stars."""
+    def _draw_corona(self, radius: float, color: Tuple[float, float, float]) -> None:
+        """Draw a beautiful corona effect for stars."""
         glDisable(GL_DEPTH_TEST)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE)  # Additive blending for glow
         
-        # Draw multiple layers with decreasing opacity
-        for i in range(5):
-            scale = 1.0 + i * 0.3
-            alpha = 0.3 - i * 0.05
-            glColor4f(color[0], color[1], color[2], alpha)
+        # Outer glow layers
+        for i in range(8):
+            scale = 1.0 + i * 0.4
+            alpha = 0.15 - i * 0.015
+            # Slightly shift color toward white for inner glow
+            r = min(1.0, color[0] + i * 0.05)
+            g = min(1.0, color[1] + i * 0.03)
+            b = min(1.0, color[2] + i * 0.02)
+            glColor4f(r, g, b, max(0, alpha))
             gluSphere(self.quadric, radius * scale, 16, 16)
         
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glEnable(GL_DEPTH_TEST)
+    
+    def _draw_atmosphere(self, radius: float, color: Tuple[float, float, float]) -> None:
+        """Draw a subtle atmosphere effect around planets."""
+        glDisable(GL_LIGHTING)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        
+        # Thin atmospheric layer
+        atm_color = (
+            min(1.0, color[0] * 0.5 + 0.3),
+            min(1.0, color[1] * 0.5 + 0.4),
+            min(1.0, color[2] * 0.5 + 0.5)
+        )
+        glColor4f(atm_color[0], atm_color[1], atm_color[2], 0.15)
+        gluSphere(self.quadric, radius * 1.08, 20, 20)
+        
+        glEnable(GL_LIGHTING)
     
     def draw_trail(self, body: CelestialBody) -> None:
         """
-        Draw the orbital trail for a celestial body.
+        Draw a beautiful orbital trail for a celestial body.
         
         Args:
             body: The celestial body whose trail to draw
@@ -168,31 +236,56 @@ class Renderer:
             return
         
         glDisable(GL_LIGHTING)
-        glLineWidth(1.5)
         
+        # Draw trail with varying width for depth effect
+        n_points = len(body.trail)
+        
+        # Draw as line strip with gradient
         glBegin(GL_LINE_STRIP)
         
         for i, pos in enumerate(body.trail):
-            # Fade trail from start to end
-            if self.trail_fade:
-                alpha = i / len(body.trail)
-            else:
-                alpha = 0.8
+            # Progress from 0 (oldest) to 1 (newest)
+            progress = i / n_points
             
-            glColor4f(body.color[0], body.color[1], body.color[2], alpha)
+            # Fade alpha from start to end
+            if self.trail_fade:
+                alpha = progress * 0.8
+            else:
+                alpha = 0.6
+            
+            # Slightly brighten color toward the end
+            r = min(1.0, body.color[0] * (0.5 + progress * 0.5))
+            g = min(1.0, body.color[1] * (0.5 + progress * 0.5))
+            b = min(1.0, body.color[2] * (0.5 + progress * 0.5))
+            
+            glColor4f(r, g, b, alpha)
             glVertex3f(pos.x, pos.y, pos.z)
         
-        # Connect to current position
+        # Connect to current position with full brightness
         glColor4f(body.color[0], body.color[1], body.color[2], 1.0)
         glVertex3f(body.position.x, body.position.y, body.position.z)
         
         glEnd()
         
+        # Draw a second pass with thinner brighter line for glow effect
+        glLineWidth(1.0)
+        glBegin(GL_LINE_STRIP)
+        
+        for i, pos in enumerate(body.trail[-50:] if len(body.trail) > 50 else body.trail):
+            progress = i / min(50, len(body.trail))
+            alpha = progress * 0.4
+            glColor4f(1.0, 1.0, 1.0, alpha * 0.3)
+            glVertex3f(pos.x, pos.y, pos.z)
+        
+        glVertex3f(body.position.x, body.position.y, body.position.z)
+        glEnd()
+        
+        glLineWidth(2.0)
         glEnable(GL_LIGHTING)
     
-    def draw_grid(self, size: float = 1000.0, divisions: int = 20) -> None:
+    def draw_grid(self, size: float = 2000.0, divisions: int = 40) -> None:
         """
-        Draw a reference grid on the XZ plane.
+        Draw a reference grid on the XZ plane with fade-out effect.
         
         Args:
             size: Size of the grid
@@ -203,7 +296,6 @@ class Renderer:
         
         glDisable(GL_LIGHTING)
         glLineWidth(1.0)
-        glColor4f(0.3, 0.3, 0.3, 0.3)
         
         step = size / divisions
         half_size = size / 2
@@ -211,6 +303,16 @@ class Renderer:
         glBegin(GL_LINES)
         
         for i in range(divisions + 1):
+            # Calculate distance from center for fade effect
+            dist_from_center = abs(i - divisions / 2) / (divisions / 2)
+            alpha = 0.25 * (1.0 - dist_from_center * 0.7)
+            
+            # Highlight center lines
+            if i == divisions // 2:
+                glColor4f(0.4, 0.4, 0.5, 0.4)
+            else:
+                glColor4f(0.2, 0.25, 0.35, alpha)
+            
             # Lines along X axis
             x = -half_size + i * step
             glVertex3f(x, 0, -half_size)
@@ -259,50 +361,245 @@ class Renderer:
         
         glEnable(GL_LIGHTING)
     
-    def draw_starfield(self, num_stars: int = 500) -> None:
+    def draw_starfield(self, num_stars: int = 1000) -> None:
         """
-        Draw a background starfield.
-        Note: Stars are at fixed positions, this is for visual effect only.
+        Draw a beautiful background starfield with varying colors and sizes.
         """
         glDisable(GL_LIGHTING)
-        glPointSize(1.5)
-        
-        glBegin(GL_POINTS)
-        glColor3f(1.0, 1.0, 1.0)
+        glDisable(GL_DEPTH_TEST)
         
         # Use deterministic positions based on index for consistency
         import random
         random.seed(42)
         
-        for _ in range(num_stars):
+        # Draw distant stars
+        glPointSize(1.0)
+        glBegin(GL_POINTS)
+        
+        for i in range(num_stars):
             # Place stars on a distant sphere
             theta = random.uniform(0, 2 * math.pi)
             phi = random.uniform(0, math.pi)
-            r = 10000
+            r = 15000
             
             x = r * math.sin(phi) * math.cos(theta)
             y = r * math.sin(phi) * math.sin(theta)
             z = r * math.cos(phi)
             
-            brightness = random.uniform(0.3, 1.0)
-            glColor3f(brightness, brightness, brightness)
+            # Vary star colors slightly (white, blue-white, yellow-white)
+            star_type = random.random()
+            if star_type < 0.1:
+                # Blue-white hot stars
+                color = (0.8, 0.9, 1.0)
+            elif star_type < 0.2:
+                # Yellow-orange stars
+                color = (1.0, 0.9, 0.7)
+            elif star_type < 0.25:
+                # Red giants
+                color = (1.0, 0.6, 0.5)
+            else:
+                # White/blue-white (most common)
+                color = (1.0, 1.0, 1.0)
+            
+            brightness = random.uniform(0.2, 1.0)
+            glColor3f(color[0] * brightness, color[1] * brightness, color[2] * brightness)
             glVertex3f(x, y, z)
         
         glEnd()
         
+        # Draw some brighter stars with larger point size
+        glPointSize(2.0)
+        glBegin(GL_POINTS)
+        
+        for i in range(num_stars // 5):
+            theta = random.uniform(0, 2 * math.pi)
+            phi = random.uniform(0, math.pi)
+            r = 14000
+            
+            x = r * math.sin(phi) * math.cos(theta)
+            y = r * math.sin(phi) * math.sin(theta)
+            z = r * math.cos(phi)
+            
+            brightness = random.uniform(0.6, 1.0)
+            glColor3f(brightness, brightness, brightness * 0.95)
+            glVertex3f(x, y, z)
+        
+        glEnd()
+        
+        glEnable(GL_DEPTH_TEST)
         glEnable(GL_LIGHTING)
     
-    def render(self, bodies: List[CelestialBody]) -> None:
+    def draw_particles(self, particle_system: 'ParticleSystem') -> None:
+        """
+        Draw all particles from the particle system.
+        
+        Args:
+            particle_system: The particle system to render
+        """
+        if not particle_system.particles:
+            return
+        
+        glPushAttrib(GL_ALL_ATTRIB_BITS)
+        
+        glDisable(GL_LIGHTING)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE)  # Additive blending for glow
+        glDepthMask(GL_FALSE)  # Don't write to depth buffer
+        
+        glPointSize(4.0)
+        glBegin(GL_POINTS)
+        
+        for particle in particle_system.particles:
+            alpha = particle.alpha
+            glColor4f(
+                particle.color[0],
+                particle.color[1],
+                particle.color[2],
+                alpha
+            )
+            glVertex3f(
+                particle.position.x,
+                particle.position.y,
+                particle.position.z
+            )
+        
+        glEnd()
+        
+        # Draw larger particles as small spheres for debris
+        for particle in particle_system.particles:
+            if particle.particle_type == "debris" and particle.size > 2:
+                alpha = particle.alpha
+                glColor4f(
+                    particle.color[0],
+                    particle.color[1],
+                    particle.color[2],
+                    alpha
+                )
+                glPushMatrix()
+                glTranslatef(
+                    particle.position.x,
+                    particle.position.y,
+                    particle.position.z
+                )
+                gluSphere(self.quadric, particle.size * 0.5, 6, 6)
+                glPopMatrix()
+        
+        glPopAttrib()  # Restore all OpenGL state
+    
+    def draw_placement_indicator(self, position: Tuple[float, float, float], 
+                                  radius: float = 15.0, 
+                                  color: Tuple[float, float, float] = (0.3, 0.8, 1.0)) -> None:
+        """
+        Draw a 3D placement indicator at the specified position.
+        
+        Args:
+            position: 3D position (x, y, z) for the indicator
+            radius: Size of the indicator
+            color: RGB color tuple
+        """
+        import time
+        pulse = abs(math.sin(time.time() * 5)) * 0.4 + 0.6
+        
+        glPushAttrib(GL_ALL_ATTRIB_BITS)
+        glDisable(GL_LIGHTING)
+        glDisable(GL_DEPTH_TEST)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE)  # Additive blending for glow
+        glLineWidth(2.0)
+        
+        x, y, z = position
+        
+        glPushMatrix()
+        glTranslatef(x, y, z)
+        
+        # Draw pulsing outer ring (horizontal in XZ plane)
+        glColor4f(color[0], color[1], color[2], 0.5 * pulse)
+        glBegin(GL_LINE_LOOP)
+        segments = 48
+        ring_radius = radius * 2.5 * pulse
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            glVertex3f(math.cos(angle) * ring_radius, 0, math.sin(angle) * ring_radius)
+        glEnd()
+        
+        # Draw middle ring
+        glColor4f(color[0], color[1], color[2], 0.7)
+        glBegin(GL_LINE_LOOP)
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            glVertex3f(math.cos(angle) * radius * 1.5, 0, math.sin(angle) * radius * 1.5)
+        glEnd()
+        
+        # Draw inner ring
+        glColor4f(1.0, 1.0, 1.0, 0.9)
+        glBegin(GL_LINE_LOOP)
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            glVertex3f(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+        glEnd()
+        
+        # Draw vertical ring (in XY plane)
+        glColor4f(color[0], color[1], color[2], 0.4)
+        glBegin(GL_LINE_LOOP)
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            glVertex3f(math.cos(angle) * radius * 1.2, math.sin(angle) * radius * 1.2, 0)
+        glEnd()
+        
+        # Draw crosshair lines
+        line_len = radius * 4
+        glColor4f(color[0], color[1], color[2], 0.6)
+        glBegin(GL_LINES)
+        # X axis
+        glVertex3f(-line_len, 0, 0)
+        glVertex3f(-radius * 1.2, 0, 0)
+        glVertex3f(radius * 1.2, 0, 0)
+        glVertex3f(line_len, 0, 0)
+        # Z axis
+        glVertex3f(0, 0, -line_len)
+        glVertex3f(0, 0, -radius * 1.2)
+        glVertex3f(0, 0, radius * 1.2)
+        glVertex3f(0, 0, line_len)
+        # Y axis (vertical)
+        glVertex3f(0, -line_len, 0)
+        glVertex3f(0, -radius * 1.2, 0)
+        glVertex3f(0, radius * 1.2, 0)
+        glVertex3f(0, line_len, 0)
+        glEnd()
+        
+        # Draw a glowing sphere at center
+        glColor4f(color[0], color[1], color[2], 0.8 * pulse)
+        gluSphere(self.quadric, radius * 0.4, 12, 12)
+        
+        # Inner bright core
+        glColor4f(1.0, 1.0, 1.0, 0.9)
+        gluSphere(self.quadric, radius * 0.2, 8, 8)
+        
+        glPopMatrix()
+        glPopAttrib()
+    
+    def render(self, bodies: List[CelestialBody], particle_system: 'ParticleSystem' = None,
+               placement_pos: Tuple[float, float, float] = None) -> None:
         """
         Render the complete scene.
         
         Args:
             bodies: List of celestial bodies to render
+            particle_system: Optional particle system for effects
+            placement_pos: Optional 3D position for placement indicator
         """
         self.clear()
         
         # Apply camera transformation
         self.camera.apply()
+        
+        # Update light position to follow first star (if any)
+        star_pos = [0.0, 0.0, 0.0, 1.0]
+        for body in bodies:
+            if body.is_star:
+                star_pos = [body.position.x, body.position.y, body.position.z, 1.0]
+                break
+        glLightfv(GL_LIGHT0, GL_POSITION, star_pos)
         
         # Draw background elements
         self.draw_starfield()
@@ -313,9 +610,23 @@ class Renderer:
         for body in bodies:
             self.draw_trail(body)
         
-        # Draw bodies
-        for body in bodies:
+        # Draw bodies - planets first, then stars on top
+        planets = [b for b in bodies if not b.is_star]
+        stars = [b for b in bodies if b.is_star]
+        
+        for body in planets:
             self.draw_body(body)
+        
+        for body in stars:
+            self.draw_body(body)
+        
+        # Draw particles (explosions, debris, etc.)
+        if particle_system:
+            self.draw_particles(particle_system)
+        
+        # Draw placement indicator if dragging
+        if placement_pos:
+            self.draw_placement_indicator(placement_pos)
     
     def cleanup(self) -> None:
         """Clean up OpenGL resources."""
