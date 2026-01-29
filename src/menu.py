@@ -94,6 +94,8 @@ class Menu:
             MenuItem("Sun", (1.0, 0.9, 0.0), 1000.0, 30, is_star=True),
             MenuItem("Red Dwarf", (1.0, 0.4, 0.2), 500.0, 15, is_star=True),
             MenuItem("Blue Giant", (0.6, 0.8, 1.0), 2000.0, 45, is_star=True),
+            MenuItem("Neutron Star", (0.7, 0.9, 1.0), 1500.0, 5, is_star=True),
+            MenuItem("Black Hole", (0.1, 0.0, 0.1), 5000.0, 20, is_star=True),
             MenuItem("Mercury", (0.7, 0.7, 0.7), 0.06, 3),
             MenuItem("Venus", (0.9, 0.7, 0.5), 0.8, 5),
             MenuItem("Earth", (0.2, 0.5, 1.0), 1.0, 6),

@@ -19,6 +19,11 @@ class CollisionEvent:
         self.position = position
         self.collision_type = "merge"  # merge, explosion, or fragment
         
+        # Stars always merge with other bodies (they don't explode or fragment)
+        if body1.is_star or body2.is_star:
+            self.collision_type = "merge"
+            return
+        
         # Determine collision type based on impact velocity and mass ratio
         mass_ratio = max(body1.mass, body2.mass) / max(0.001, min(body1.mass, body2.mass))
         
@@ -63,8 +68,8 @@ class PhysicsEngine:
         self.collision_count = 0
         
         # Physics settings
-        self.substeps = 4  # Number of sub-steps per frame for stability
-        self.softening = 5.0  # Softening parameter to prevent extreme forces
+        self.substeps = 4  # Number of sub-steps per frame (Yoshida is accurate enough with fewer)
+        self.min_softening = 0.1  # Very small softening - only prevents true singularities
     
     def add_body(self, body: CelestialBody) -> None:
         """Add a celestial body to the simulation."""
@@ -85,9 +90,10 @@ class PhysicsEngine:
     def compute_gravitational_forces(self) -> None:
         """
         Compute gravitational forces between all pairs of bodies.
-        Uses Newton's law of universal gravitation with softening.
+        Uses Newton's law of universal gravitation with adaptive softening.
         """
         n = len(self.bodies)
+        G = CelestialBody.G
         
         # Reset all accelerations
         for body in self.bodies:
@@ -101,15 +107,20 @@ class PhysicsEngine:
                 
                 # Direction from i to j
                 direction = body_j.position - body_i.position
-                dist_sq = direction.magnitude_squared
+                distance = direction.magnitude
                 
-                # Add softening to prevent extreme forces at close range
-                softened_dist_sq = dist_sq + self.softening ** 2
-                distance = math.sqrt(softened_dist_sq)
+                # Skip if bodies are overlapping (collision will handle this)
+                min_dist = (body_i.radius + body_j.radius) * 0.5
+                softening = max(self.min_softening, min_dist * 0.1)
                 
-                # Force magnitude: F = G * m1 * m2 / (r^2 + softening^2)
-                G = CelestialBody.G
-                force_magnitude = G * body_i.mass * body_j.mass / softened_dist_sq
+                if distance < min_dist:
+                    continue
+                
+                # Add small softening to prevent numerical issues
+                softened_dist = max(distance, softening)
+                
+                # Force magnitude: F = G * m1 * m2 / r^2
+                force_magnitude = G * body_i.mass * body_j.mass / (softened_dist * softened_dist)
                 
                 # Force vector (normalized direction * magnitude)
                 if distance > 0:
@@ -205,6 +216,14 @@ class PhysicsEngine:
         # Determine if result is a star
         is_star = body1.is_star or body2.is_star
         
+        # Check for SUPERNOVA - when merged star exceeds critical mass
+        SUPERNOVA_MASS_THRESHOLD = 4000.0
+        BLACK_HOLE_MASS_THRESHOLD = 6000.0
+        
+        if is_star and total_mass > SUPERNOVA_MASS_THRESHOLD:
+            self._handle_supernova(event, total_mass, new_position, new_velocity)
+            return
+        
         # Create merged body
         larger = body1 if body1.mass > body2.mass else body2
         merged = CelestialBody(
@@ -228,6 +247,96 @@ class PhysicsEngine:
             size=2.0,
             lifetime=1.0
         )
+    
+    def _handle_supernova(self, event: CollisionEvent, total_mass: float, 
+                          position: Vector3, velocity: Vector3) -> None:
+        """Handle a supernova explosion when star mass exceeds critical threshold."""
+        BLACK_HOLE_MASS_THRESHOLD = 6000.0
+        
+        # Massive explosion effect
+        self.particles.create_explosion(
+            position,
+            (1.0, 0.9, 0.5),  # Bright yellow-white
+            num_particles=800,
+            speed=150.0,
+            size=8.0,
+            lifetime=5.0
+        )
+        
+        # Multiple shockwaves
+        for i in range(3):
+            self.particles.create_shockwave(
+                position,
+                (1.0, 0.7 - i * 0.2, 0.3),
+                radius=100.0 + i * 50,
+                num_particles=150
+            )
+        
+        # Create debris cloud
+        self.particles.create_debris(
+            position,
+            velocity,
+            (0.8, 0.4, 0.2),
+            num_particles=200,
+            spread=100.0,
+            size=4.0
+        )
+        
+        # Determine remnant type based on mass
+        if total_mass > BLACK_HOLE_MASS_THRESHOLD:
+            # Create a BLACK HOLE
+            remnant = CelestialBody(
+                name="Black Hole",
+                mass=total_mass * 0.4,  # Some mass ejected
+                radius=8,  # Small but massive
+                position=position,
+                velocity=velocity,
+                color=(0.1, 0.0, 0.1),
+                is_star=True  # Treated as star for physics
+            )
+            self._bodies_to_add.append(remnant)
+            print(f"SUPERNOVA! Black Hole formed with mass {remnant.mass:.0f}")
+        else:
+            # Create a NEUTRON STAR
+            remnant = CelestialBody(
+                name="Neutron Star",
+                mass=total_mass * 0.3,  # Most mass ejected
+                radius=4,  # Very small
+                position=position,
+                velocity=velocity,
+                color=(0.7, 0.9, 1.0),
+                is_star=True
+            )
+            self._bodies_to_add.append(remnant)
+            print(f"SUPERNOVA! Neutron Star formed with mass {remnant.mass:.0f}")
+        
+        # Eject some planetary nebula fragments
+        num_fragments = random.randint(3, 6)
+        ejected_mass = total_mass * 0.1 / num_fragments
+        
+        for i in range(num_fragments):
+            angle = 2 * math.pi * i / num_fragments + random.uniform(-0.3, 0.3)
+            elevation = random.uniform(-0.5, 0.5)
+            
+            direction = Vector3(
+                math.cos(angle) * math.cos(elevation),
+                math.sin(elevation),
+                math.sin(angle) * math.cos(elevation)
+            )
+            
+            frag_velocity = velocity + direction * random.uniform(80, 150)
+            frag_position = position + direction * 50
+            
+            fragment = CelestialBody(
+                name=f"Nebula_{self.collision_count}_{i}",
+                mass=ejected_mass,
+                radius=random.uniform(3, 8),
+                position=frag_position,
+                velocity=frag_velocity,
+                color=(random.uniform(0.5, 1.0), random.uniform(0.3, 0.7), random.uniform(0.5, 1.0)),
+                is_star=False
+            )
+            self._bodies_to_add.append(fragment)
     
     def _handle_explosion(self, event: CollisionEvent) -> None:
         """Handle a high-energy collision - bodies are destroyed."""
@@ -448,31 +557,57 @@ class PhysicsEngine:
     
     def _physics_step(self, dt: float) -> None:
         """
-        Perform a single physics integration step using Velocity Verlet.
+        Perform a single physics integration step using 4th-order Yoshida symplectic integrator.
+        This provides much better long-term energy conservation than basic leapfrog.
         
         Args:
             dt: Time step in seconds
         """
-        # Store current accelerations
-        for body in self.bodies:
-            body.prev_acceleration = body.acceleration.copy()
+        # Yoshida 4th-order coefficients
+        w0 = -1.7024143839193153
+        w1 = 1.3512071919596578
+        c1 = w1 / 2
+        c2 = (w0 + w1) / 2
+        c3 = c2
+        c4 = c1
+        d1 = w1
+        d2 = w0
+        d3 = w1
         
-        # Compute accelerations based on current positions
+        # Step 1: drift c1*dt
+        for body in self.bodies:
+            body.position = body.position + body.velocity * (c1 * dt)
+        
+        # Step 2: kick d1*dt
         self.compute_gravitational_forces()
-        
-        # Update velocities using average of old and new accelerations
-        # v(t+dt) = v(t) + 0.5 * (a(t) + a(t+dt)) * dt
         for body in self.bodies:
-            avg_accel = (body.prev_acceleration + body.acceleration) * 0.5
-            body.velocity = body.velocity + avg_accel * dt
+            body.velocity = body.velocity + body.acceleration * (d1 * dt)
         
-        # Update positions: x(t+dt) = x(t) + v(t+dt) * dt
+        # Step 3: drift c2*dt
         for body in self.bodies:
-            body.position = body.position + body.velocity * dt
+            body.position = body.position + body.velocity * (c2 * dt)
+        
+        # Step 4: kick d2*dt
+        self.compute_gravitational_forces()
+        for body in self.bodies:
+            body.velocity = body.velocity + body.acceleration * (d2 * dt)
+        
+        # Step 5: drift c3*dt
+        for body in self.bodies:
+            body.position = body.position + body.velocity * (c3 * dt)
+        
+        # Step 6: kick d3*dt
+        self.compute_gravitational_forces()
+        for body in self.bodies:
+            body.velocity = body.velocity + body.acceleration * (d3 * dt)
+        
+        # Step 7: drift c4*dt
+        for body in self.bodies:
+            body.position = body.position + body.velocity * (c4 * dt)
             
-            # Update trail less frequently
+            # Update trail
             body.trail_update_counter += 1
-            if body.trail_update_counter >= body.trail_update_frequency * self.substeps:
+            if body.trail_update_counter >= body.trail_update_frequency:
                 body.trail.append(body.position.copy())
                 if len(body.trail) > body.trail_length:
                     body.trail.pop(0)

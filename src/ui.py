@@ -44,7 +44,8 @@ class UI:
         self.height = height
     
     def render(self, screen: pygame.Surface, physics: PhysicsEngine, 
-               fps: float, selected_body: Optional[CelestialBody] = None) -> None:
+               fps: float, selected_body: Optional[CelestialBody] = None,
+               camera_info: dict = None) -> None:
         """
         Render the UI overlay.
         
@@ -53,12 +54,13 @@ class UI:
             physics: Physics engine for simulation data
             fps: Current frames per second
             selected_body: Currently selected celestial body
+            camera_info: Dictionary with camera distance, azimuth, elevation
         """
         if self.show_help:
             self._render_help(screen)
         
         if self.show_info:
-            self._render_info(screen, physics, fps)
+            self._render_info(screen, physics, fps, camera_info)
         
         if selected_body:
             self._render_body_info(screen, selected_body)
@@ -83,7 +85,8 @@ class UI:
         screen.blit(surface, (x, y))
         return y + font.get_height() + 2
     
-    def _render_info(self, screen: pygame.Surface, physics: PhysicsEngine, fps: float) -> None:
+    def _render_info(self, screen: pygame.Surface, physics: PhysicsEngine, fps: float, 
+                      camera_info: dict = None) -> None:
         """Render simulation information."""
         x, y = 10, 10
         
@@ -110,14 +113,16 @@ class UI:
         collision_color = (100, 255, 100) if physics.collisions_enabled else (255, 100, 100)
         y = self._render_text(screen, f"Collisions: {collision_status}", x, y, self.font_small, collision_color)
         
+        # Camera info
+        if camera_info:
+            y += 5
+            y = self._render_text(screen, "── Camera ──", x, y, self.font_small, self.dim_color)
+            y = self._render_text(screen, f"Distance: {camera_info['distance']:.0f}", x, y, self.font_small)
+            y = self._render_text(screen, f"Angle: {camera_info['azimuth']:.0f}° / {camera_info['elevation']:.0f}°", x, y, self.font_small)
+        
         # Particle count (if any)
         if physics.particles.particles:
             y = self._render_text(screen, f"Particles: {len(physics.particles.particles)}", x, y, self.font_small, self.dim_color)
-        
-        # Total energy (for debugging/physics verification)
-        if len(physics.bodies) > 0:
-            energy = physics.total_energy()
-            y = self._render_text(screen, f"Total Energy: {energy:.2e} J", x, y, self.font_small, self.dim_color)
     
     def _render_body_info(self, screen: pygame.Surface, body: CelestialBody) -> None:
         """Render information about a selected body."""
@@ -142,12 +147,12 @@ class UI:
     def _render_help(self, screen: pygame.Surface) -> None:
         """Render the help overlay."""
         # Semi-transparent background
-        overlay = pygame.Surface((400, 400))
+        overlay = pygame.Surface((420, 480))
         overlay.fill((0, 0, 0))
         overlay.set_alpha(200)
         
-        x = (self.width - 400) // 2
-        y = (self.height - 400) // 2
+        x = (self.width - 420) // 2
+        y = (self.height - 480) // 2
         screen.blit(overlay, (x, y))
         
         # Help content
@@ -160,22 +165,21 @@ class UI:
         controls = [
             ("Mouse Drag", "Rotate camera"),
             ("Mouse Wheel", "Zoom in/out"),
-            ("Middle Mouse Drag", "Pan camera"),
-            ("SPACE", "Pause/Resume simulation"),
-            ("+/-", "Adjust time scale"),
+            ("Middle Mouse", "Pan camera"),
+            ("SPACE", "Pause/Resume"),
+            ("+/-", "Time scale x2"),
+            ("[ / ]", "Time scale x5"),
+            ("BACKSPACE", "Remove last body"),
             ("R", "Reset camera"),
-            ("C", "Clear all trails"),
+            ("C", "Clear trails"),
             ("G", "Toggle grid"),
             ("T", "Toggle trails"),
             ("K", "Toggle collisions"),
-            ("M", "Toggle sidebar menu"),
-            ("1", "Load Solar System"),
-            ("2", "Load Binary Stars"),
-            ("3", "Load Earth-Moon"),
-            ("4", "Load Random System"),
-            ("0", "Clear all bodies"),
-            ("I", "Toggle info panel"),
-            ("H", "Toggle this help"),
+            ("M", "Toggle menu"),
+            ("1-4", "Load presets"),
+            ("0", "Clear all"),
+            ("I", "Toggle info"),
+            ("H", "Toggle help"),
             ("ESC", "Quit"),
         ]
         
@@ -183,8 +187,19 @@ class UI:
             key_surface = self.font_small.render(key, True, self.highlight_color)
             action_surface = self.font_small.render(f"  {action}", True, self.text_color)
             screen.blit(key_surface, (text_x, text_y))
-            screen.blit(action_surface, (text_x + 120, text_y))
-            text_y += 20
+            screen.blit(action_surface, (text_x + 100, text_y))
+            text_y += 18
+        
+        text_y += 10
+        text_y = self._render_text(screen, "Features", text_x, text_y, self.font_medium, self.highlight_color)
+        features = [
+            "• Drag objects from menu to add",
+            "• Stars merge on collision",
+            "• Supernova when star mass > 4000",
+            "• Creates Black Holes or Neutron Stars",
+        ]
+        for feat in features:
+            text_y = self._render_text(screen, feat, text_x, text_y, self.font_small, self.dim_color)
     
     def toggle_help(self) -> None:
         """Toggle the help overlay."""

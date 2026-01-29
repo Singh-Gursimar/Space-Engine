@@ -55,7 +55,7 @@ class CelestialBody:
         self.trail: List[Vector3] = []
         self.trail_length = trail_length
         self.trail_update_counter = 0
-        self.trail_update_frequency = 3  # Update trail every N frames
+        self.trail_update_frequency = 2  # Update trail every N physics steps
         
         # Selection state
         self.is_selected = False
@@ -71,6 +71,7 @@ class CelestialBody:
     def update(self, dt: float) -> None:
         """
         Update position and velocity using Velocity Verlet integration.
+        Note: Trail updates are handled by the physics engine to avoid duplicates.
         
         Args:
             dt: Time step in seconds
@@ -80,14 +81,6 @@ class CelestialBody:
         
         # Update position
         self.position = self.position + self.velocity * dt
-        
-        # Update trail
-        self.trail_update_counter += 1
-        if self.trail_update_counter >= self.trail_update_frequency:
-            self.trail.append(self.position.copy())
-            if len(self.trail) > self.trail_length:
-                self.trail.pop(0)
-            self.trail_update_counter = 0
     
     def update_velocity(self, dt: float) -> None:
         """Complete the velocity update (second half of Verlet)."""

@@ -19,7 +19,7 @@ def orbital_velocity(central_mass: float, distance: float) -> float:
 
 def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     """
-    Create a simplified solar system.
+    Create a simplified solar system with well-spaced orbits.
     
     Args:
         physics: The physics engine to add bodies to
@@ -29,7 +29,7 @@ def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     sun = CelestialBody(
         name="Sun",
         mass=SUN_MASS,
-        radius=30 * scale,
+        radius=25 * scale,
         position=Vector3(0, 0, 0),
         velocity=Vector3(0, 0, 0),
         color=(1.0, 0.9, 0.0),
@@ -38,7 +38,7 @@ def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     physics.add_body(sun)
     
     # Mercury
-    mercury_dist = 60 * scale
+    mercury_dist = 80 * scale
     mercury = CelestialBody(
         name="Mercury",
         mass=PLANET_MASS * 0.06,
@@ -50,7 +50,7 @@ def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     physics.add_body(mercury)
     
     # Venus
-    venus_dist = 90 * scale
+    venus_dist = 140 * scale
     venus = CelestialBody(
         name="Venus",
         mass=PLANET_MASS * 0.8,
@@ -62,7 +62,7 @@ def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     physics.add_body(venus)
     
     # Earth
-    earth_dist = 120 * scale
+    earth_dist = 200 * scale
     earth = CelestialBody(
         name="Earth",
         mass=PLANET_MASS,
@@ -74,7 +74,7 @@ def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     physics.add_body(earth)
     
     # Mars
-    mars_dist = 160 * scale
+    mars_dist = 280 * scale
     mars = CelestialBody(
         name="Mars",
         mass=PLANET_MASS * 0.1,
@@ -86,7 +86,7 @@ def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     physics.add_body(mars)
     
     # Jupiter
-    jupiter_dist = 220 * scale
+    jupiter_dist = 420 * scale
     jupiter = CelestialBody(
         name="Jupiter",
         mass=GAS_GIANT_MASS,
@@ -98,7 +98,7 @@ def create_solar_system(physics: PhysicsEngine, scale: float = 1.0) -> None:
     physics.add_body(jupiter)
     
     # Saturn
-    saturn_dist = 300 * scale
+    saturn_dist = 580 * scale
     saturn = CelestialBody(
         name="Saturn",
         mass=GAS_GIANT_MASS * 0.5,
@@ -120,13 +120,13 @@ def create_binary_star_system(physics: PhysicsEngine, scale: float = 1.0) -> Non
     """
     # Two stars orbiting each other
     star_mass = SUN_MASS * 0.8
-    star_dist = 80 * scale
+    star_dist = 120 * scale
     orbital_vel = math.sqrt(CelestialBody.G * star_mass / (star_dist * 2))
     
     star1 = CelestialBody(
         name="Star Alpha",
         mass=star_mass,
-        radius=25 * scale,
+        radius=22 * scale,
         position=Vector3(-star_dist, 0, 0),
         velocity=Vector3(0, 0, -orbital_vel),
         color=(1.0, 0.8, 0.4),
@@ -145,14 +145,14 @@ def create_binary_star_system(physics: PhysicsEngine, scale: float = 1.0) -> Non
     )
     physics.add_body(star2)
     
-    # Planet orbiting both stars
-    planet_dist = 300 * scale
+    # Planet orbiting both stars (needs to be far enough out)
+    planet_dist = 450 * scale
     total_mass = star1.mass + star2.mass
     planet_vel = math.sqrt(CelestialBody.G * total_mass / planet_dist)
     
     planet = CelestialBody(
         name="Circumbinary Planet",
-        mass=PLANET_MASS,
+        mass=PLANET_MASS * 2,
         radius=8 * scale,
         position=Vector3(planet_dist, 0, 0),
         velocity=Vector3(0, 0, planet_vel),
@@ -174,7 +174,7 @@ def create_earth_moon_system(physics: PhysicsEngine, scale: float = 1.0) -> None
     earth = CelestialBody(
         name="Earth",
         mass=earth_mass,
-        radius=20 * scale,
+        radius=25 * scale,
         position=Vector3(0, 0, 0),
         velocity=Vector3(0, 0, 0),
         color=(0.2, 0.5, 1.0)
@@ -182,13 +182,13 @@ def create_earth_moon_system(physics: PhysicsEngine, scale: float = 1.0) -> None
     physics.add_body(earth)
     
     # Moon
-    moon_dist = 80 * scale
+    moon_dist = 120 * scale
     moon_vel = math.sqrt(CelestialBody.G * earth_mass / moon_dist)
     
     moon = CelestialBody(
         name="Moon",
-        mass=PLANET_MASS * 0.01,
-        radius=6 * scale,
+        mass=PLANET_MASS * 0.1,
+        radius=8 * scale,
         position=Vector3(moon_dist, 0, 0),
         velocity=Vector3(0, 0, moon_vel),
         color=(0.7, 0.7, 0.7)
@@ -244,7 +244,7 @@ def create_asteroid_belt(physics: PhysicsEngine, central_mass: float,
 
 def create_random_system(physics: PhysicsEngine, num_bodies: int = 10, scale: float = 1.0) -> None:
     """
-    Create a random system of bodies.
+    Create a random system of bodies with well-spaced orbits.
     
     Args:
         physics: The physics engine to add bodies to
@@ -257,7 +257,7 @@ def create_random_system(physics: PhysicsEngine, num_bodies: int = 10, scale: fl
     star = CelestialBody(
         name="Central Star",
         mass=SUN_MASS,
-        radius=30 * scale,
+        radius=25 * scale,
         position=Vector3(0, 0, 0),
         velocity=Vector3(0, 0, 0),
         color=(1.0, 0.95, 0.8),
@@ -277,10 +277,13 @@ def create_random_system(physics: PhysicsEngine, num_bodies: int = 10, scale: fl
         (0.8, 0.8, 0.2),  # Yellow
     ]
     
+    # Space planets out evenly
     for i in range(num_bodies - 1):
-        dist = random.uniform(80, 350) * scale
+        # Distribute distances more evenly (100 to 500, spaced out)
+        base_dist = 100 + (400 * (i + 1) / num_bodies)
+        dist = (base_dist + random.uniform(-20, 20)) * scale
         angle = random.uniform(0, 2 * math.pi)
-        inclination = random.uniform(-0.1, 0.1)
+        inclination = random.uniform(-0.05, 0.05)
         
         x = dist * math.cos(angle)
         y = dist * inclination
@@ -293,7 +296,7 @@ def create_random_system(physics: PhysicsEngine, num_bodies: int = 10, scale: fl
         planet = CelestialBody(
             name=f"Planet_{i+1}",
             mass=random.uniform(PLANET_MASS * 0.5, GAS_GIANT_MASS),
-            radius=random.uniform(3, 12) * scale,
+            radius=random.uniform(4, 10) * scale,
             position=Vector3(x, y, z),
             velocity=Vector3(vx, 0, vz),
             color=random.choice(colors)

@@ -165,8 +165,13 @@ class SpaceEngine:
                 
                 # Perpendicular direction for orbit (cross with up)
                 up = Vector3(0, 1, 0)
-                tangent = direction.cross(up).normalize()
+                tangent = direction.cross(up)
                 
+                # If tangent is zero (direction parallel to up), use a different perpendicular
+                if tangent.magnitude < 0.001:
+                    tangent = direction.cross(Vector3(1, 0, 0))
+                
+                tangent = tangent.normalize()
                 velocity = tangent * orbital_speed
         
         # Create unique name
@@ -189,60 +194,40 @@ class SpaceEngine:
     
     def _screen_to_world_pos(self, screen_pos: tuple) -> Vector3:
         """
-        Convert a screen position to a 3D world position using OpenGL unprojection.
+        Convert a screen position to a 3D world position on the Y=0 plane.
         
         Args:
             screen_pos: (x, y) screen coordinates
             
         Returns:
-            Vector3 world position on the camera's focal plane
+            Vector3 world position on the orbital plane
         """
         camera = self.renderer.camera
         
-        # Get OpenGL matrices
-        modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
-        projection = glGetDoublev(GL_PROJECTION_MATRIX)
-        viewport = glGetIntegerv(GL_VIEWPORT)
+        # Simple approach: map screen position to XZ plane based on camera view
+        # Normalize screen coordinates to -1 to 1
+        norm_x = (screen_pos[0] / self.width) * 2 - 1
+        norm_y = -((screen_pos[1] / self.height) * 2 - 1)  # Flip Y
         
-        # Flip Y coordinate (OpenGL has origin at bottom-left)
-        win_x = float(screen_pos[0])
-        win_y = float(viewport[3] - screen_pos[1])
+        # Calculate camera vectors
+        az_rad = math.radians(camera.azimuth)
+        el_rad = math.radians(camera.elevation)
         
-        # Unproject at z=0.5 (middle of view frustum)
-        try:
-            world_x, world_y, world_z = gluUnProject(win_x, win_y, 0.5, modelview, projection, viewport)
-            
-            # Calculate direction from camera to unprojected point
-            cam_pos = camera.position
-            direction = Vector3(world_x - cam_pos.x, world_y - cam_pos.y, world_z - cam_pos.z).normalize()
-            
-            # Project onto the plane at camera target distance
-            # Place object at a fixed distance from camera toward target
-            placement_distance = camera.distance * 0.8
-            
-            position = Vector3(
-                cam_pos.x + direction.x * placement_distance,
-                cam_pos.y + direction.y * placement_distance,
-                cam_pos.z + direction.z * placement_distance
-            )
-            
-            return position
-        except:
-            # Fallback to simple calculation if unprojection fails
-            norm_x = (screen_pos[0] / self.width) * 2 - 1
-            norm_y = -((screen_pos[1] / self.height) * 2 - 1)
-            
-            offset_scale = camera.distance * 0.3
-            az_rad = math.radians(camera.azimuth)
-            
-            right_x = math.cos(az_rad)
-            right_z = -math.sin(az_rad)
-            
-            pos_x = camera.target.x + norm_x * offset_scale * right_x
-            pos_y = camera.target.y + norm_y * offset_scale
-            pos_z = camera.target.z + norm_x * offset_scale * right_z
-            
-            return Vector3(pos_x, pos_y, pos_z)
+        # Right vector (perpendicular to view direction in XZ plane)
+        right = Vector3(math.cos(az_rad), 0, -math.sin(az_rad))
+        
+        # Up vector (mostly Y, adjusted for elevation)
+        up = Vector3(0, 1, 0)
+        
+        # Scale based on distance (closer = smaller movement)
+        scale = camera.distance * 0.5
+        
+        # Place relative to camera target (center of view)
+        pos_x = camera.target.x + norm_x * scale * right.x + norm_y * scale * 0.3 * math.sin(el_rad) * math.sin(az_rad)
+        pos_y = norm_y * scale * 0.3 * math.cos(el_rad)  # Slight Y offset based on screen Y
+        pos_z = camera.target.z + norm_x * scale * right.z + norm_y * scale * 0.3 * math.sin(el_rad) * math.cos(az_rad)
+        
+        return Vector3(pos_x, pos_y, pos_z)
     
     def _get_placement_position(self) -> tuple:
         """
@@ -303,10 +288,28 @@ class SpaceEngine:
             print(f"Collisions {status}")
         
         elif key == K_PLUS or key == K_EQUALS:
-            self.physics.set_time_scale(self.physics.time_scale * 1.5)
+            self.physics.set_time_scale(self.physics.time_scale * 2.0)
+            print(f"Time scale: {self.physics.time_scale:.1f}x")
         
         elif key == K_MINUS:
-            self.physics.set_time_scale(self.physics.time_scale / 1.5)
+            self.physics.set_time_scale(self.physics.time_scale / 2.0)
+            print(f"Time scale: {self.physics.time_scale:.1f}x")
+        
+        elif key == K_LEFTBRACKET:
+            # Slow down a lot
+            self.physics.set_time_scale(self.physics.time_scale / 5.0)
+            print(f"Time scale: {self.physics.time_scale:.2f}x")
+        
+        elif key == K_RIGHTBRACKET:
+            # Speed up a lot
+            self.physics.set_time_scale(self.physics.time_scale * 5.0)
+            print(f"Time scale: {self.physics.time_scale:.1f}x")
+        
+        elif key == K_BACKSPACE:
+            # Remove the last added body
+            if self.physics.bodies:
+                removed = self.physics.bodies.pop()
+                print(f"Removed {removed.name}")
         
         # Preset systems
         elif key == K_1:
@@ -327,16 +330,26 @@ class SpaceEngine:
         
         if preset_name == "solar":
             solar_system.create_solar_system(self.physics)
+            self.renderer.camera.distance = 800
+            self.renderer.camera.elevation = 45
         elif preset_name == "binary":
             solar_system.create_binary_star_system(self.physics)
+            self.renderer.camera.distance = 700
+            self.renderer.camera.elevation = 40
         elif preset_name == "earth_moon":
             solar_system.create_earth_moon_system(self.physics)
+            self.renderer.camera.distance = 300
+            self.renderer.camera.elevation = 35
         elif preset_name == "random":
             solar_system.create_random_system(self.physics, num_bodies=8)
+            self.renderer.camera.distance = 600
+            self.renderer.camera.elevation = 45
         elif preset_name == "clear":
-            pass  # Already cleared
+            self.renderer.camera.distance = 500
         
-        self.renderer.camera.reset()
+        self.renderer.camera.target = Vector3(0, 0, 0)
+        self.renderer.camera.azimuth = 45
+        self.renderer.camera._update_position()
     
     def _handle_mouse_down(self, event: pygame.event.Event) -> None:
         """Handle mouse button press."""
@@ -399,8 +412,16 @@ class SpaceEngine:
         ui_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         ui_surface.fill((0, 0, 0, 0))
         
+        # Get camera info for UI
+        camera = self.renderer.camera
+        camera_info = {
+            'distance': camera.distance,
+            'azimuth': camera.azimuth,
+            'elevation': camera.elevation
+        }
+        
         # Render UI elements
-        self.ui.render(ui_surface, self.physics, self.current_fps, self.selected_body)
+        self.ui.render(ui_surface, self.physics, self.current_fps, self.selected_body, camera_info)
         
         # Render menu
         self.menu.render(ui_surface)
@@ -484,8 +505,8 @@ class SpaceEngine:
         print("="*50 + "\n")
         
         while self.running:
-            # Calculate delta time
-            dt = self.clock.tick(self.target_fps) / 1000.0
+            # Calculate delta time (cap to prevent instability on lag spikes)
+            dt = min(self.clock.tick(self.target_fps) / 1000.0, 0.05)
             self.current_fps = self.clock.get_fps()
             
             # Handle events
