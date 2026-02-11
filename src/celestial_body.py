@@ -52,6 +52,9 @@ class CelestialBody:
         self.prev_acceleration = Vector3(0, 0, 0)  # For Verlet integration
         
         # Trail for orbital visualization
+        # Using a list, but we optimize removal by popping from the start
+        # when it gets too long. Since n=500, list.pop(0) is acceptable but
+        # could be optimized with collections.deque if performance becomes an issue.
         self.trail: List[Vector3] = []
         self.trail_length = trail_length
         self.trail_update_counter = 0

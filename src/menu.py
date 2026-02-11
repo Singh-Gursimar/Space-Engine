@@ -2,7 +2,8 @@
 
 import pygame
 import math
-from typing import List, Optional, Tuple, Callable
+from typing import List, Optional, Tuple, Any, Dict
+from collections.abc import Callable
 from .celestial_body import CelestialBody
 from .vector3 import Vector3
 
@@ -35,7 +36,7 @@ class MenuItem:
 class PresetItem:
     """Represents a preset solar system."""
     
-    def __init__(self, name: str, description: str, loader: Callable):
+    def __init__(self, name: str, description: str, loader: Callable[[], None]):
         self.name = name
         self.description = description
         self.loader = loader
@@ -148,7 +149,7 @@ class Menu:
         """Check if a point is inside the menu."""
         return self.get_menu_rect().collidepoint(pos)
     
-    def handle_event(self, event: pygame.event.Event) -> Optional[dict]:
+    def handle_event(self, event: pygame.event.Event) -> Optional[Dict[str, Any]]:
         """
         Handle pygame events.
         
@@ -180,7 +181,7 @@ class Menu:
         
         return None
     
-    def _handle_click(self, pos: Tuple[int, int]) -> Optional[dict]:
+    def _handle_click(self, pos: Tuple[int, int]) -> Optional[Dict[str, Any]]:
         """Handle mouse click."""
         menu_rect = self.get_menu_rect()
         
@@ -212,7 +213,7 @@ class Menu:
         
         return None
     
-    def _handle_drop(self, pos: Tuple[int, int]) -> Optional[dict]:
+    def _handle_drop(self, pos: Tuple[int, int]) -> Optional[Dict[str, Any]]:
         """Handle drop after dragging."""
         if not self.dragging_item:
             return None
@@ -440,7 +441,6 @@ class Menu:
         # Draw concentric circles
         for i, radius in enumerate([outer_radius, 20, 10]):
             alpha = 150 - i * 40
-            color = (*self.accent_color[:3], alpha) if len(self.accent_color) == 3 else (*self.accent_color[:3], alpha)
             # Create surface for alpha support
             circle_surf = pygame.Surface((radius * 2 + 4, radius * 2 + 4), pygame.SRCALPHA)
             pygame.draw.circle(circle_surf, (100, 180, 255, alpha), (radius + 2, radius + 2), radius, 2)

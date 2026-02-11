@@ -17,10 +17,41 @@ class CollisionEvent:
         self.body2 = body2
         self.impact_velocity = impact_velocity
         self.position = position
-        self.collision_type = "merge"  # merge, explosion, or fragment
+        self.collision_type = "merge"  # merge, explosion, fragment, black_hole_consume
         
-        # Stars always merge with other bodies (they don't explode or fragment)
-        if body1.is_star or body2.is_star:
+        # Check for black holes or neutron stars
+        body1_is_black_hole = 'black hole' in body1.name.lower()
+        body2_is_black_hole = 'black hole' in body2.name.lower()
+        body1_is_neutron = 'neutron' in body1.name.lower()
+        body2_is_neutron = 'neutron' in body2.name.lower()
+        
+        # Black holes consume everything (except other black holes)
+        if body1_is_black_hole and not body2_is_black_hole:
+            self.collision_type = "black_hole_consume"
+            return
+        elif body2_is_black_hole and not body1_is_black_hole:
+            self.collision_type = "black_hole_consume"
+            return
+        elif body1_is_black_hole and body2_is_black_hole:
+            # Two black holes merge
+            self.collision_type = "black_hole_merge"
+            return
+        
+        # Neutron stars are extremely dense - they consume smaller objects
+        # But if the object is comparable in mass, they merge normally
+        if body1_is_neutron and not body2.is_star and body2.mass < body1.mass * 0.5:
+            self.collision_type = "neutron_consume"
+            return
+        elif body2_is_neutron and not body1.is_star and body1.mass < body2.mass * 0.5:
+            self.collision_type = "neutron_consume"
+            return
+        elif body1_is_neutron or body2_is_neutron:
+            # Neutron star with comparable mass object - regular merge
+            self.collision_type = "merge"
+            return
+        
+        # Regular stars merge with other bodies (don't explode or fragment)
+        if (body1.is_star and not body1_is_neutron) or (body2.is_star and not body2_is_neutron):
             self.collision_type = "merge"
             return
         
@@ -68,8 +99,9 @@ class PhysicsEngine:
         self.collision_count = 0
         
         # Physics settings
-        self.substeps = 4  # Number of sub-steps per frame (Yoshida is accurate enough with fewer)
+        self.base_substeps = 8  # Base number of sub-steps per frame (increased for better stability)
         self.min_softening = 0.1  # Very small softening - only prevents true singularities
+        self.max_substep_dt = 0.02  # Maximum dt per substep for stability
     
     def add_body(self, body: CelestialBody) -> None:
         """Add a celestial body to the simulation."""
@@ -172,6 +204,10 @@ class PhysicsEngine:
     
     def handle_collision(self, event: CollisionEvent) -> None:
         """Handle a collision event."""
+        # Check if either body has already been processed in another collision this frame
+        if event.body1 in self._bodies_to_remove or event.body2 in self._bodies_to_remove:
+            return
+
         body1 = event.body1
         body2 = event.body2
         
@@ -181,7 +217,13 @@ class PhysicsEngine:
         
         self.collision_count += 1
         
-        if event.collision_type == "explosion":
+        if event.collision_type == "black_hole_consume":
+            self._handle_black_hole_consume(event)
+        elif event.collision_type == "black_hole_merge":
+            self._handle_black_hole_merge(event)
+        elif event.collision_type == "neutron_consume":
+            self._handle_neutron_consume(event)
+        elif event.collision_type == "explosion":
             self._handle_explosion(event)
         elif event.collision_type == "fragment":
             self._handle_fragmentation(event)
@@ -191,6 +233,118 @@ class PhysicsEngine:
         # Call callback if set
         if self.collision_callback:
             self.collision_callback(event)
+    
+    def _handle_black_hole_consume(self, event: CollisionEvent) -> None:
+        """Handle a black hole consuming an object."""
+        body1, body2 = event.body1, event.body2
+        
+        # Determine which is the black hole
+        black_hole = body1 if 'black hole' in body1.name.lower() else body2
+        consumed = body2 if black_hole == body1 else body1
+        
+        # Black hole grows in mass but not much in size
+        new_mass = black_hole.mass + consumed.mass
+        # Schwarzschild radius: r ∝ mass, but we'll grow it slowly
+        new_radius = black_hole.radius * (1 + 0.05 * (consumed.mass / black_hole.mass))
+        
+        # Conservation of momentum
+        new_velocity = (black_hole.velocity * black_hole.mass + consumed.velocity * consumed.mass) / new_mass
+        
+        # Create enhanced black hole
+        enhanced_black_hole = CelestialBody(
+            name=black_hole.name,
+            mass=new_mass,
+            radius=new_radius,
+            position=black_hole.position,
+            velocity=new_velocity,
+            color=(0.05, 0.0, 0.1),  # Very dark purple
+            is_star=True
+        )
+        
+        self._bodies_to_add.append(enhanced_black_hole)
+        
+        # Create accretion disk effect
+        self.particles.create_debris(
+            black_hole.position,
+            new_velocity,
+            (0.8, 0.4, 1.0),  # Purple glow
+            num_particles=80,
+            spread=30.0,
+            size=3.0
+        )
+        
+        print(f"Black hole consumed {consumed.name}! New mass: {new_mass:.0f}")
+    
+    def _handle_black_hole_merge(self, event: CollisionEvent) -> None:
+        """Handle two black holes merging (gravitational wave event)."""
+        body1, body2 = event.body1, event.body2
+        
+        total_mass = body1.mass + body2.mass
+        new_velocity = (body1.velocity * body1.mass + body2.velocity * body2.mass) / total_mass
+        
+        # Merged black hole is larger
+        new_radius = max(body1.radius, body2.radius) * 1.4
+        
+        merged_black_hole = CelestialBody(
+            name="Supermassive Black Hole",
+            mass=total_mass * 0.95,  # Small amount of mass radiated as gravitational waves
+            radius=new_radius,
+            position=event.position,
+            velocity=new_velocity,
+            color=(0.02, 0.0, 0.05),  # Almost black
+            is_star=True
+        )
+        
+        self._bodies_to_add.append(merged_black_hole)
+        
+        # Massive gravitational wave burst (visual effect)
+        for i in range(4):
+            self.particles.create_shockwave(
+                event.position,
+                (0.5, 0.2, 0.8),
+                radius=150.0 + i * 50,
+                num_particles=100
+            )
+        
+        print(f"BLACK HOLE MERGER! Gravitational waves detected! Mass: {merged_black_hole.mass:.0f}")
+    
+    def _handle_neutron_consume(self, event: CollisionEvent) -> None:
+        """Handle a neutron star consuming a smaller object."""
+        body1, body2 = event.body1, event.body2
+        
+        # Determine which is the neutron star
+        neutron = body1 if 'neutron' in body1.name.lower() else body2
+        consumed = body2 if neutron == body1 else body1
+        
+        new_mass = neutron.mass + consumed.mass
+        # Neutron stars stay very compact
+        new_radius = neutron.radius * (1 + 0.02 * (consumed.mass / neutron.mass))
+        
+        new_velocity = (neutron.velocity * neutron.mass + consumed.velocity * consumed.mass) / new_mass
+        
+        enhanced_neutron = CelestialBody(
+            name=neutron.name,
+            mass=new_mass,
+            radius=new_radius,
+            position=neutron.position,
+            velocity=new_velocity,
+            color=(0.8, 0.95, 1.0),  # Bright blue-white
+            is_star=True
+        )
+        
+        self._bodies_to_add.append(enhanced_neutron)
+        
+        # X-ray burst effect
+        self.particles.create_explosion(
+            neutron.position,
+            (0.7, 0.9, 1.0),
+            num_particles=60,
+            speed=80.0,
+            size=3.0,
+            lifetime=1.5
+        )
+        
+        print(f"Neutron star consumed {consumed.name}! Mass: {new_mass:.0f}")
     
     def _handle_merge(self, event: CollisionEvent) -> None:
         """Handle a merger collision - two bodies become one."""
@@ -213,14 +367,19 @@ class PhysicsEngine:
         b = (body1.color[2] * body1.mass + body2.color[2] * body2.mass) / total_mass
         new_color = (min(1.0, r), min(1.0, g), min(1.0, b))
         
+        # Check if either body is already a black hole or neutron star (shouldn't happen here but safety check)
+        body1_is_exotic = 'black hole' in body1.name.lower() or 'neutron' in body1.name.lower()
+        body2_is_exotic = 'black hole' in body2.name.lower() or 'neutron' in body2.name.lower()
+        
         # Determine if result is a star
         is_star = body1.is_star or body2.is_star
         
         # Check for SUPERNOVA - when merged star exceeds critical mass
+        # But only for regular stars, not already exotic objects
         SUPERNOVA_MASS_THRESHOLD = 4000.0
         BLACK_HOLE_MASS_THRESHOLD = 6000.0
         
-        if is_star and total_mass > SUPERNOVA_MASS_THRESHOLD:
+        if is_star and not body1_is_exotic and not body2_is_exotic and total_mass > SUPERNOVA_MASS_THRESHOLD:
             self._handle_supernova(event, total_mass, new_position, new_velocity)
             return
         
@@ -529,10 +688,17 @@ class PhysicsEngine:
         scaled_dt = dt * self.time_scale
         self.total_time += scaled_dt
         
-        # Sub-stepping for stability
-        sub_dt = scaled_dt / self.substeps
+        # Adaptive sub-stepping for stability at high time scales
+        # Increase substeps when time scale is high to keep individual steps small
+        substeps = max(self.base_substeps, int(self.base_substeps * self.time_scale / 2))
         
-        for _ in range(self.substeps):
+        # Ensure individual timestep doesn't exceed max for stability
+        sub_dt = scaled_dt / substeps
+        if sub_dt > self.max_substep_dt:
+            substeps = int(scaled_dt / self.max_substep_dt) + 1
+            sub_dt = scaled_dt / substeps
+        
+        for _ in range(substeps):
             self._physics_step(sub_dt)
         
         # Detect and handle collisions (once per frame, not per substep)

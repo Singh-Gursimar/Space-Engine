@@ -58,7 +58,7 @@ class Renderer:
         glEnable(GL_LIGHT0)
         
         # Main light (sun-like, from center)
-        light_position = [0.0, 50.0, 0.0, 1.0]  # Positional light at origin
+        light_position = [0.0, 0.0, 0.0, 1.0]  # Positional light at origin
         light_ambient = [0.15, 0.15, 0.18, 1.0]  # Slight blue-ish ambient
         light_diffuse = [1.0, 0.95, 0.9, 1.0]  # Warm white
         light_specular = [1.0, 1.0, 1.0, 1.0]
@@ -553,10 +553,10 @@ class Renderer:
         self.camera.apply()
         
         # Update light position to follow first star (if any)
-        star_pos = [0.0, 100.0, 100.0, 1.0]
+        star_pos = [0.0, 0.0, 0.0, 1.0]
         for body in bodies:
             if body.is_star:
-                star_pos = [body.position.x, body.position.y + 10, body.position.z, 1.0]
+                star_pos = [body.position.x, body.position.y, body.position.z, 1.0]
                 break
         glLightfv(GL_LIGHT0, GL_POSITION, star_pos)
         

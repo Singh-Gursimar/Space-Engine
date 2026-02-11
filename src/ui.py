@@ -1,7 +1,7 @@
 """Simple UI overlay for the simulation."""
 
 import pygame
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from .celestial_body import CelestialBody
 from .physics import PhysicsEngine
 
@@ -45,7 +45,7 @@ class UI:
     
     def render(self, screen: pygame.Surface, physics: PhysicsEngine, 
                fps: float, selected_body: Optional[CelestialBody] = None,
-               camera_info: dict = None) -> None:
+               camera_info: Optional[Dict[str, Any]] = None) -> None:
         """
         Render the UI overlay.
         
@@ -98,7 +98,10 @@ class UI:
         y = self._render_text(screen, f"FPS: {fps:.1f}", x, y, self.font_small)
         
         # Time scale
-        y = self._render_text(screen, f"Time Scale: {physics.time_scale:.1f}x", x, y, self.font_small)
+        time_scale_text = f"Time Scale: {physics.time_scale:.1f}x"
+        if physics.time_scale > 4.0:
+            time_scale_text += " (high-precision mode)"
+        y = self._render_text(screen, time_scale_text, x, y, self.font_small)
         
         # Simulation status
         status = "PAUSED" if physics.paused else "RUNNING"
@@ -117,8 +120,14 @@ class UI:
         if camera_info:
             y += 5
             y = self._render_text(screen, "── Camera ──", x, y, self.font_small, self.dim_color)
-            y = self._render_text(screen, f"Distance: {camera_info['distance']:.0f}", x, y, self.font_small)
-            y = self._render_text(screen, f"Angle: {camera_info['azimuth']:.0f}° / {camera_info['elevation']:.0f}°", x, y, self.font_small)
+            mode_text = f"Mode: {camera_info.get('mode', 'orbit').upper()}"
+            y = self._render_text(screen, mode_text, x, y, self.font_small, self.highlight_color)
+            
+            if camera_info.get('mode') == 'orbit':
+                y = self._render_text(screen, f"Distance: {camera_info['distance']:.0f}", x, y, self.font_small)
+                y = self._render_text(screen, f"Angle: {camera_info['azimuth']:.0f}° / {camera_info['elevation']:.0f}°", x, y, self.font_small)
+            else:
+                y = self._render_text(screen, f"Speed: {camera_info.get('speed', 100):.0f}", x, y, self.font_small)
         
         # Particle count (if any)
         if physics.particles.particles:
@@ -163,9 +172,12 @@ class UI:
         text_y += 10
         
         controls = [
-            ("Mouse Drag", "Rotate camera"),
-            ("Mouse Wheel", "Zoom in/out"),
-            ("Middle Mouse", "Pan camera"),
+            ("Mouse Drag", "Look around / Rotate"),
+            ("Mouse Wheel", "Zoom / Move speed"),
+            ("Middle Mouse", "Pan (orbit mode)"),
+            ("F", "Toggle Free/Orbit mode"),
+            ("WASD", "Move camera (free)"),
+            ("Q/E", "Move down/up (free)"),
             ("SPACE", "Pause/Resume"),
             ("+/-", "Time scale x2"),
             ("[ / ]", "Time scale x5"),

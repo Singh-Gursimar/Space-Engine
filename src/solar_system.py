@@ -118,17 +118,28 @@ def create_binary_star_system(physics: PhysicsEngine, scale: float = 1.0) -> Non
         physics: The physics engine to add bodies to
         scale: Scale factor for distances and sizes
     """
-    # Two stars orbiting each other
-    star_mass = SUN_MASS * 0.8
-    star_dist = 120 * scale
-    orbital_vel = math.sqrt(CelestialBody.G * star_mass / (star_dist * 2))
+    # Two stars orbiting each other around their common center of mass
+    mass1 = SUN_MASS * 0.8
+    mass2 = mass1 * 0.8
+    total_mass = mass1 + mass2
+    separation = 240 * scale  # Total separation between stars
+    
+    # Each star orbits the barycenter at distances proportional to the inverse of their masses
+    # r1 * m1 = r2 * m2 and r1 + r2 = separation
+    r1 = separation * mass2 / total_mass  # Distance of star1 from barycenter
+    r2 = separation * mass1 / total_mass  # Distance of star2 from barycenter
+    
+    # Orbital velocity for each star: v = sqrt(G * M_other / separation)
+    # Actually: v1 = sqrt(G * m2^2 / (m1 + m2) / separation)
+    v1 = math.sqrt(CelestialBody.G * mass2 * mass2 / total_mass / separation)
+    v2 = math.sqrt(CelestialBody.G * mass1 * mass1 / total_mass / separation)
     
     star1 = CelestialBody(
         name="Star Alpha",
-        mass=star_mass,
+        mass=mass1,
         radius=22 * scale,
-        position=Vector3(-star_dist, 0, 0),
-        velocity=Vector3(0, 0, -orbital_vel),
+        position=Vector3(-r1, 0, 0),
+        velocity=Vector3(0, 0, -v1),
         color=(1.0, 0.8, 0.4),
         is_star=True
     )
@@ -136,10 +147,10 @@ def create_binary_star_system(physics: PhysicsEngine, scale: float = 1.0) -> Non
     
     star2 = CelestialBody(
         name="Star Beta",
-        mass=star_mass * 0.8,
+        mass=mass2,
         radius=20 * scale,
-        position=Vector3(star_dist, 0, 0),
-        velocity=Vector3(0, 0, orbital_vel),
+        position=Vector3(r2, 0, 0),
+        velocity=Vector3(0, 0, v2),
         color=(0.8, 0.9, 1.0),
         is_star=True
     )
@@ -232,7 +243,7 @@ def create_asteroid_belt(physics: PhysicsEngine, central_mass: float,
         
         asteroid = CelestialBody(
             name=f"Asteroid_{i}",
-            mass=random.uniform(1e15, 1e18),
+            mass=0.001,  # Use scaled mass consistent with other bodies
             radius=random.uniform(1, 3) * scale,
             position=Vector3(x, height, z),
             velocity=Vector3(vx, 0, vz),

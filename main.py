@@ -3,23 +3,36 @@ Space Engine - A 3D Physics Simulator for Space Objects
 Create your own solar systems with realistic gravitational physics!
 
 Controls:
-    Mouse Drag      - Rotate camera
-    Mouse Wheel     - Zoom in/out
-    Middle Mouse    - Pan camera
+    Mouse Drag      - Rotate camera / Look around
+    Mouse Wheel     - Zoom in/out / Adjust move speed
+    Middle Mouse    - Pan camera (orbit mode)
+    F               - Toggle Free/Orbit camera mode
+    WASD            - Move camera (free mode)
+    Q/E             - Move down/up (free mode)
     SPACE           - Pause/Resume simulation
     +/-             - Adjust time scale
     M               - Toggle menu
     K               - Toggle collisions
     H               - Show help
+    R               - Reset camera
     ESC             - Quit
 """
 
 import sys
 import math
 import pygame
-from pygame.locals import *
-from OpenGL.GL import *
-from OpenGL.GLU import *
+from pygame.locals import (
+    DOUBLEBUF, OPENGL, RESIZABLE, QUIT, VIDEORESIZE, 
+    MOUSEBUTTONDOWN, MOUSEBUTTONUP, MOUSEMOTION, MOUSEWHEEL,
+    KEYDOWN, K_ESCAPE, K_SPACE, 
+    K_w, K_a, K_s, K_d, K_q, K_e, K_f, K_h, K_i, K_m, K_r, K_g, K_t, K_c, K_k,
+    K_PLUS, K_EQUALS, K_MINUS, 
+    K_LEFTBRACKET, K_RIGHTBRACKET, K_BACKSPACE,
+    K_0, K_1, K_2, K_3, K_4
+)
+from OpenGL.GL import glViewport, glMatrixMode, glLoadIdentity, glEnable, glDisable, glClear, glFlush, glGetDoublev, glGetIntegerv, glGenTextures, glBindTexture, glTexParameteri, glTexImage2D, glBegin, glEnd, glTexCoord2f, glVertex2f, glBlendFunc, glPushMatrix, glPopMatrix, glOrtho, glColor4f, glDeleteTextures, GL_PROJECTION, GL_MODELVIEW, GL_MODELVIEW_MATRIX, GL_PROJECTION_MATRIX, GL_VIEWPORT, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_DEPTH_TEST, GL_BLEND, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_TEXTURE_2D, GL_LINEAR, GL_TEXTURE_MIN_FILTER, GL_TEXTURE_MAG_FILTER, GL_RGBA, GL_UNSIGNED_BYTE, GL_QUADS, GL_LIGHTING  # type: ignore
+from OpenGL.GLU import gluPerspective, gluUnProject  # type: ignore
+from typing import Dict, Any, Optional, Tuple
 
 from src.physics import PhysicsEngine
 from src.renderer import Renderer
@@ -133,7 +146,7 @@ class SpaceEngine:
                 if not self.menu.point_in_menu(pygame.mouse.get_pos()):
                     self._handle_mouse_wheel(event)
     
-    def _handle_menu_action(self, action: dict) -> None:
+    def _handle_menu_action(self, action: Dict[str, Any]) -> None:
         """Handle actions from the menu."""
         if action["action"] == "load_preset":
             preset = action["preset"]
@@ -142,7 +155,7 @@ class SpaceEngine:
         elif action["action"] == "add_body":
             self._add_body_at_screen_pos(action["item"], action["screen_pos"])
     
-    def _add_body_at_screen_pos(self, item, screen_pos: tuple) -> None:
+    def _add_body_at_screen_pos(self, item: CelestialBody, screen_pos: Tuple[float, float]) -> None:
         """
         Add a celestial body at a screen position.
         Projects the screen position into 3D space.
@@ -192,9 +205,9 @@ class SpaceEngine:
         self.physics.add_body(body)
         print(f"Added {name} at position {position}")
     
-    def _screen_to_world_pos(self, screen_pos: tuple) -> Vector3:
+    def _screen_to_world_pos(self, screen_pos: tuple[float, float]) -> Vector3:
         """
-        Convert a screen position to a 3D world position on the Y=0 plane.
+        Convert a screen position to a 3D world position on the Y=0 plane using raycasting.
         
         Args:
             screen_pos: (x, y) screen coordinates
@@ -202,34 +215,46 @@ class SpaceEngine:
         Returns:
             Vector3 world position on the orbital plane
         """
-        camera = self.renderer.camera
+        x, y = screen_pos
+        # OpenGL Y is inverted relative to window Y
+        y = self.height - y
         
-        # Simple approach: map screen position to XZ plane based on camera view
-        # Normalize screen coordinates to -1 to 1
-        norm_x = (screen_pos[0] / self.width) * 2 - 1
-        norm_y = -((screen_pos[1] / self.height) * 2 - 1)  # Flip Y
-        
-        # Calculate camera vectors
-        az_rad = math.radians(camera.azimuth)
-        el_rad = math.radians(camera.elevation)
-        
-        # Right vector (perpendicular to view direction in XZ plane)
-        right = Vector3(math.cos(az_rad), 0, -math.sin(az_rad))
-        
-        # Up vector (mostly Y, adjusted for elevation)
-        up = Vector3(0, 1, 0)
-        
-        # Scale based on distance (closer = smaller movement)
-        scale = camera.distance * 0.5
-        
-        # Place relative to camera target (center of view)
-        pos_x = camera.target.x + norm_x * scale * right.x + norm_y * scale * 0.3 * math.sin(el_rad) * math.sin(az_rad)
-        pos_y = norm_y * scale * 0.3 * math.cos(el_rad)  # Slight Y offset based on screen Y
-        pos_z = camera.target.z + norm_x * scale * right.z + norm_y * scale * 0.3 * math.sin(el_rad) * math.cos(az_rad)
-        
-        return Vector3(pos_x, pos_y, pos_z)
+        try:
+            # Get matrices
+            modelview: Any = glGetDoublev(GL_MODELVIEW_MATRIX)  # type: ignore
+            projection: Any = glGetDoublev(GL_PROJECTION_MATRIX)  # type: ignore
+            viewport: Any = glGetIntegerv(GL_VIEWPORT)  # type: ignore
+            
+            # Unproject two points to get the ray
+            # Point on near plane (z=0)
+            near_point = gluUnProject(x, y, 0.0, modelview, projection, viewport)
+            # Point on far plane (z=1)
+            far_point = gluUnProject(x, y, 1.0, modelview, projection, viewport)
+            
+            ray_origin = Vector3(near_point[0], near_point[1], near_point[2])
+            ray_end = Vector3(far_point[0], far_point[1], far_point[2])
+            
+            ray_direction = ray_end - ray_origin
+            
+            # Intersect with Plane Y=0
+            # Plane normal N = (0, 1, 0)
+            # t = -dot(Origin, N) / dot(Direction, N) = -Origin.y / Direction.y
+            
+            if abs(ray_direction.y) < 1e-6:
+                # Ray is parallel to plane, return target projection as fallback
+                return Vector3(self.renderer.camera.target.x, 0, self.renderer.camera.target.z)
+                
+            t = -ray_origin.y / ray_direction.y
+            
+            intersection = ray_origin + ray_direction * t
+            return intersection
+            
+        except Exception as e:
+            # Fallback if GL calls fail
+            print(f"Error in screen projection: {e}")
+            return Vector3(0, 0, 0)
     
-    def _get_placement_position(self) -> tuple:
+    def _get_placement_position(self) -> Optional[Tuple[float, float, float]]:
         """
         Get the 3D placement position if currently dragging.
         
@@ -271,6 +296,10 @@ class SpaceEngine:
         
         elif key == K_r:
             self.renderer.camera.reset()
+        
+        elif key == K_f:
+            mode = self.renderer.camera.toggle_mode()
+            print(f"Camera mode: {mode.upper()} (WASD to move, QE for up/down)" if mode == 'free' else "Camera mode: ORBIT")
         
         elif key == K_g:
             self.renderer.show_grid = not self.renderer.show_grid
@@ -349,7 +378,8 @@ class SpaceEngine:
         
         self.renderer.camera.target = Vector3(0, 0, 0)
         self.renderer.camera.azimuth = 45
-        self.renderer.camera._update_position()
+        if self.renderer.camera.mode == 'orbit':
+            self.renderer.camera._update_position()  # type: ignore
     
     def _handle_mouse_down(self, event: pygame.event.Event) -> None:
         """Handle mouse button press."""
@@ -395,12 +425,38 @@ class SpaceEngine:
         Args:
             dt: Delta time in seconds
         """
+        # Handle camera movement in free mode
+        if self.renderer.camera.mode == 'free':
+            keys = pygame.key.get_pressed()
+            forward = 0.0
+            right = 0.0
+            up = 0.0
+            
+            if keys[K_w]:
+                forward += 1.0
+            if keys[K_s]:
+                forward -= 1.0
+            if keys[K_d]:
+                right += 1.0
+            if keys[K_a]:
+                right -= 1.0
+            if keys[K_e]:
+                up += 1.0
+            if keys[K_q]:
+                up -= 1.0
+            
+            # Apply movement
+            if forward != 0 or right != 0 or up != 0:
+                self.renderer.camera.move(forward, right, up, dt)
+        
         self.physics.update(dt)
     
     def render(self) -> None:
         """Render the scene."""
         # Get placement position if dragging
         placement_pos = self._get_placement_position()
+        if placement_pos is None:
+            placement_pos = (0.0, 0.0, 0.0)  # Provide default value
         
         # Render 3D scene with particles and placement indicator
         self.renderer.render(self.physics.bodies, self.physics.particles, placement_pos)
@@ -414,10 +470,12 @@ class SpaceEngine:
         
         # Get camera info for UI
         camera = self.renderer.camera
-        camera_info = {
+        camera_info: Dict[str, Any] = {
+            'mode': camera.mode,
             'distance': camera.distance,
             'azimuth': camera.azimuth,
-            'elevation': camera.elevation
+            'elevation': camera.elevation,
+            'speed': camera.move_speed
         }
         
         # Render UI elements
@@ -454,7 +512,7 @@ class SpaceEngine:
         
         # Create texture
         glEnable(GL_TEXTURE_2D)
-        texture_id = glGenTextures(1)
+        texture_id: int = glGenTextures(1)  # type: ignore
         glBindTexture(GL_TEXTURE_2D, texture_id)
         
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
